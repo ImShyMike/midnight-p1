@@ -5,6 +5,7 @@ const messageInput = document.getElementById('messageInput');
 const ctx = document.getElementById('myChart');
 let labels = [];
 let gay = [];
+let lesbian = "#ec3750";
 
 const myChart = new Chart(ctx, {
     type: 'line',
@@ -12,15 +13,29 @@ const myChart = new Chart(ctx, {
         labels: labels,
         datasets: [{
             data: gay,
-            borderWidth: 1
-        }]
+            borderWidth: 3,
+            // fill: true,
+            borderColor: lesbian,
+            tension: 0.5,
+            pointRadius: 0,
+        }],
     },
     options: {
+        animation: false,
+        // animation:{
+        //   duration: 120,
+        //     easing: 'easeInOut'
+        // },
         scales: {
             y: {
                 beginAtZero: true
             }
-        }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
     }
 });
 
@@ -38,10 +53,22 @@ ws.onmessage = (event) => {
     const message = document.createElement('div');
     message.className = 'message';
     message.textContent = event.data;
-    messages.appendChild(message);
+    messages.innerText = event.data;
     messages.scrollTop = messages.scrollHeight;
-    labels.push("");
+    if (labels.length < 40) labels.push("");
     gay.push(event.data);
+    if (gay.length > 40){
+        gay.shift();
+    }
+    if(event.data === "0"){
+        lesbian = "#8492a6";
+        document.getElementById("honkshoo").innerText = "Dead"
+    }else{
+        lesbian = "#ec3750";
+        document.getElementById("honkshoo").innerText = "Alive"
+    }
+
+
     myChart.update();
 };
 
@@ -65,12 +92,3 @@ function sendMessage() {
         messageInput.value = '';
     }
 }
-
-// Send message on Enter key
-messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendMessage();
-    }
-});
-
-

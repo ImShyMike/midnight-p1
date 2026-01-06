@@ -6,15 +6,18 @@
 </head>
 <body>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<h1>estorgen</h1>
-<div id="status">Connecting to server...</div>
-<div id="messages"></div>
+<h1><span id="messages">--</span> BPM</h1>
+<h2><span id="honkshoo">Alive</span></h2>
 <div>
   <canvas id="myChart"></canvas>
 </div>
+<div id="status">Connecting to server...</div>
 
-
-
+<details id="thing">
+  <summary>API</summary>
+  <label for="key">API Key</label><input id="key">
+  <label for="url">API URL</label><input id="url">
+</details>
 
 <!--<div>-->
 <!--  <input type="text" id="messageInput" placeholder="Type your message">-->
