@@ -2,29 +2,32 @@
 
 import asyncio
 from collections import deque
-from typing import Any, Dict, Deque, Tuple, TypedDict, cast
-
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
-from numpy.typing import NDArray
+from typing import Any, Deque, Dict, Tuple, TypedDict, cast
 
 import httpx
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.signal import butter, filtfilt, find_peaks # type: ignore
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from numpy.typing import NDArray
+from scipy.signal import butter, filtfilt, find_peaks  # type: ignore
 
 URL = "http://192.168.20.59:8080"
 MAX_POINTS = 250
-LOWCUT = 5  # 60 BPM
-HIGHCUT = 20  # 240 BPM
+LOWCUT = 2  # 60 BPM
+HIGHCUT = 10  # 240 BPM
 POLL_INTERVAL = 0.1
-PROMINENCE_MULTIPLIER = 1
-MIN_PROMINENCE = 0.0005
+PROMINENCE_MULTIPLIER = 1.5
+MIN_PROMINENCE = 0.005
+MIN_PEAK_SPACING_SEC = 0.35  # ~170 BPM
 
 
 async def fetch_data(client: httpx.AsyncClient, last_time: float) -> Dict[str, Any]:
     """Fetch data from phyphox"""
-    params: Dict[str, str | float] = {"accZ": f"{last_time}|acc_time", "acc_time": last_time}
+    params: Dict[str, str | float] = {
+        "accZ": f"{last_time}|acc_time",
+        "acc_time": last_time,
+    }
     response = await client.get("/get", params=params)
     response.raise_for_status()
     return response.json()
@@ -37,13 +40,16 @@ def butter_bandpass_filter(
     nyq = 0.5 * fs
     low = lowcut / nyq
     high = highcut / nyq
-    b, a = butter(order, [low, high], btype="band") # type: ignore
+    b, a = butter(order, [low, high], btype="band")  # type: ignore
     if data.size <= 27:
         # Not enough samples for filtfilt padding yet; let caller skip metrics until buffer grows.
         return np.array([])
     return filtfilt(b, a, data)
 
+
 class Metrics(TypedDict):
+    """Metrics type"""
+
     filtered: np.ndarray
     peaks: np.ndarray
     bpm_times: np.ndarray
@@ -52,6 +58,7 @@ class Metrics(TypedDict):
 
 
 def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
+    """Get metrics from the signal"""
     metrics: Metrics = {
         "filtered": np.array([]),
         "peaks": np.array([], dtype=int),
@@ -74,7 +81,7 @@ def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
     filtered = butter_bandpass_filter(signal, LOWCUT, HIGHCUT, float(fs_value))
     if not filtered.size:
         return metrics
-    distance = max(int(fs_value / HIGHCUT), 1)
+    distance = max(int(MIN_PEAK_SPACING_SEC * fs_value), 1)
     baseline = np.median(filtered)
     mad = np.median(np.abs(filtered - baseline))
     noise_level = max(mad * 1.4826, MIN_PROMINENCE)
@@ -113,8 +120,8 @@ def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
 
 def init_plots() -> Tuple[Figure, NDArray[np.object_], Line2D, Line2D, Line2D, Line2D]:
     """Init the plots"""
-    plt.ion() # type: ignore
-    fig, axes = plt.subplots(3, 1, figsize=(12, 10)) # type: ignore
+    plt.ion()  # type: ignore
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10))  # type: ignore
 
     (raw_line,) = axes[0].plot([], [], label="Raw accZ", color="gray", alpha=0.6)
     axes[0].set_title("Raw Accelerometer Data")
@@ -142,7 +149,7 @@ def init_plots() -> Tuple[Figure, NDArray[np.object_], Line2D, Line2D, Line2D, L
     axes[2].legend()
 
     fig.tight_layout()
-    plt.show(block=False) # type: ignore
+    plt.show(block=False)  # type: ignore
 
     return fig, axes, raw_line, filtered_line, peak_marks, hr_line
 
@@ -190,7 +197,7 @@ def update_plots(
         hr_line.set_data([], [])
         axes[2].set_xlim(times[0], times[-1])
 
-    fig.canvas.draw() # type: ignore
+    fig.canvas.draw()  # type: ignore
     fig.canvas.flush_events()
     plt.pause(0.001)
 
