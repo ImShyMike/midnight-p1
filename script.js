@@ -95,3 +95,39 @@ function sendMessage() {
         messageInput.value = '';
     }
 }
+
+function sendHeartbeat(heartrate) {
+    const apiUrl = document.getElementById('url').value;
+    const apiKey = document.getElementById('key').value;
+    const proxyUrl = 'https://corsproxy.io/?';
+    fetch(`${proxyUrl}${encodeURIComponent(apiUrl + '/users/current/heartbeats')}`, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ // Wakatime compatible
+            time: Math.floor(Date.now() / 1000),
+            type: "file",
+            entity: '/my/heart',
+            category: "coding",
+            line: heartrate,
+            user_agent: "heartatime/1.0.0",
+            is_write: false,
+            cursorpos: 0
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok ' + response.statusText);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Heartbeat sent successfully:', data);
+    })
+    .catch(error => {
+        console.error('There was a problem with the fetch operation:', error);
+    });
+}

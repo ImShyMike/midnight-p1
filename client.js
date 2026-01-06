@@ -34,7 +34,7 @@ ws.on('close', () => {
 
 // Function to prompt user for messages
 function promptForMessage() {
-    rl.question('Enter a message (or "exit" to quit): ', (message) => {
+    rl.question('', (message) => {
         if (message.toLowerCase() === 'exit') {
             ws.close();
             rl.close();

@@ -14,5 +14,5 @@ A hackatime extension for your heart! <sub>(that also happens to check if you're
 5. Tap the three dots > Allow remote acccess.
 6. Update the `PHYPHOX_IP` in `main.py` with the IP address shown in phyphox.
 7. Run the backend with `uv sync` and then `uv run main.py`.
-8. Run the frontend with `npm install` and then `node cliet.js`.
-9. Open the frontend in your browser at `http://localhost:3000`.
+8. Run the frontend with `npm install` and then `node client.js`.
+9. Open the frontend in your browser at the file location (this is very jank, we ran out of time).
