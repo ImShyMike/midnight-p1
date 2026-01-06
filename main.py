@@ -67,25 +67,30 @@ def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
         "fs": None,
     }
 
+    # Early exit if not enough data
     if len(times) < 10:
         return metrics
 
+    # Calculate sampling frequency
     dt = np.diff(times)
     if dt.size == 0 or not np.all(dt > 0):
         return metrics
 
+    # Calculate Hz
     fs_value = float(1 / np.mean(dt))
     if fs_value <= 0:
         return metrics
 
+    # Filter signal
     filtered = butter_bandpass_filter(signal, LOWCUT, HIGHCUT, float(fs_value))
     if not filtered.size:
         return metrics
-    distance = max(int(MIN_PEAK_SPACING_SEC * fs_value), 1)
-    baseline = np.median(filtered)
-    mad = np.median(np.abs(filtered - baseline))
-    noise_level = max(mad * 1.4826, MIN_PROMINENCE)
-    min_prominence = PROMINENCE_MULTIPLIER * noise_level
+    # Detect peaks
+    distance = max(int(MIN_PEAK_SPACING_SEC * fs_value), 1) # distance in samples
+    baseline = np.median(filtered) # baseline level
+    mad = np.median(np.abs(filtered - baseline)) # median absolute deviation
+    noise_level = max(mad * 1.4826, MIN_PROMINENCE) # noise estimate
+    min_prominence = PROMINENCE_MULTIPLIER * noise_level # min prominence based on noise
     peaks_raw, _properties = cast(
         Tuple[np.ndarray, dict[str, Any]],
         find_peaks(
@@ -101,6 +106,7 @@ def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
     metrics["peaks"] = peaks_arr
     metrics["fs"] = fs_value
 
+    # Calculate BPM
     if peaks_arr.size >= 2:
         peak_times = times[peaks_arr]
         rr = np.diff(peak_times)
@@ -213,6 +219,7 @@ async def main() -> None:
 
     async with httpx.AsyncClient(base_url=URL, timeout=5.0) as client:
         while True:
+            # Fetch new data from phyphox
             try:
                 json_data = await fetch_data(client, last_time)
             except httpx.HTTPError as exc:
@@ -224,6 +231,7 @@ async def main() -> None:
             acc_times: "list[float]" = buffer.get("acc_time", {}).get("buffer", [])
             acc_z = buffer.get("accZ", {}).get("buffer", [])
 
+            # Parse and append new data
             added = 0
             for t, z in zip(acc_times, acc_z):
                 if t > last_time:
@@ -232,6 +240,7 @@ async def main() -> None:
                     last_time = float(t)
                     added += 1
 
+            # Update plots if there's enough data
             if added and len(time_buffer) >= 5:
                 times_np = np.array(time_buffer, dtype=float)
                 signal_np = np.array(accel_buffer, dtype=float)
