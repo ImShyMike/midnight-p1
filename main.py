@@ -7,19 +7,24 @@ from typing import Any, Deque, Dict, Tuple, TypedDict, cast
 import httpx
 import matplotlib.pyplot as plt
 import numpy as np
+import websockets
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
 from scipy.signal import butter, filtfilt, find_peaks  # type: ignore
+from websockets.server import ServerProtocol
+
+send_message_queue: deque[float] = deque()
 
 URL = "http://192.168.20.59:8080"
 MAX_POINTS = 250
-LOWCUT = 5  # 60 BPM
-HIGHCUT = 20  # 240 BPM
+LOWCUT = 0.8  # 48 BPM - low end of heart rate
+HIGHCUT = 4.0  # 240 BPM - high end of heart rate
 POLL_INTERVAL = 0.1
-PROMINENCE_MULTIPLIER = 1.5
-MIN_PROMINENCE = 0.005
-MIN_PEAK_SPACING_SEC = 0.35  # ~170 BPM
+PROMINENCE_MULTIPLIER = 0.5
+MIN_PROMINENCE = 0.01
+MIN_PEAK_SPACING_SEC = 0.4  # ~150 BPM max to avoid double-counting
+BPM_WINDOW = 5  # Used for smoothing
 
 
 async def fetch_data(client: httpx.AsyncClient, last_time: float) -> Dict[str, Any]:
@@ -42,7 +47,7 @@ def butter_bandpass_filter(
     high = highcut / nyq
     b, a = butter(order, [low, high], btype="band")  # type: ignore
     if data.size <= 27:
-        # Not enough samples for filtfilt padding yet; let caller skip metrics until buffer grows.
+        # Skip if not enough data
         return np.array([])
     return filtfilt(b, a, data)
 
@@ -54,16 +59,18 @@ class Metrics(TypedDict):
     peaks: np.ndarray
     bpm_times: np.ndarray
     bpm: np.ndarray
+    instantaneous_bpm: np.ndarray
     fs: float | None
 
 
 def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
-    """Get metrics from the signal"""
+    """Get metrics from SCG signal"""
     metrics: Metrics = {
         "filtered": np.array([]),
         "peaks": np.array([], dtype=int),
         "bpm_times": np.array([]),
         "bpm": np.array([]),
+        "instantaneous_bpm": np.array([]),
         "fs": None,
     }
 
@@ -85,18 +92,29 @@ def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
     filtered = butter_bandpass_filter(signal, LOWCUT, HIGHCUT, float(fs_value))
     if not filtered.size:
         return metrics
+
+    # Convert to absolute values
+    envelope = np.abs(filtered)
+
     # Detect peaks
-    distance = max(int(MIN_PEAK_SPACING_SEC * fs_value), 1) # distance in samples
-    baseline = np.median(filtered) # baseline level
-    mad = np.median(np.abs(filtered - baseline)) # median absolute deviation
-    noise_level = max(mad * 1.4826, MIN_PROMINENCE) # noise estimate
-    min_prominence = PROMINENCE_MULTIPLIER * noise_level # min prominence based on noise
+    distance = max(int(MIN_PEAK_SPACING_SEC * fs_value), 1)
+
+    # Dynamic thresholding using percentiles
+    baseline = np.percentile(envelope, 25)
+    peak_level = np.percentile(envelope, 75)
+    min_height = baseline + (peak_level - baseline) * 0.3
+
+    # Calculate prominence relative to noise level
+    mad = np.median(np.abs(envelope - np.median(envelope)))
+    noise_level = max(mad * 1.4826, MIN_PROMINENCE)
+    min_prominence = PROMINENCE_MULTIPLIER * noise_level
+
     peaks_raw, _properties = cast(
         Tuple[np.ndarray, dict[str, Any]],
         find_peaks(
-            filtered,
+            envelope,
             distance=distance,
-            height=baseline + min_prominence,
+            height=min_height,
             prominence=min_prominence,
         ),
     )
@@ -106,21 +124,37 @@ def compute_metrics(times: np.ndarray, signal: np.ndarray) -> Metrics:
     metrics["peaks"] = peaks_arr
     metrics["fs"] = fs_value
 
-    # Calculate BPM
+    # Calculate BPM from inter-beat intervals
     if peaks_arr.size >= 2:
         peak_times = times[peaks_arr]
-        rr = np.diff(peak_times)
-        valid = rr > 0
+        ibi = np.diff(peak_times)  # Inter-beat intervals in seconds
+        valid = (ibi >= 0.25) & (ibi <= 2.0)  # Filter for valid IBIs (30-240 BPM)
+
         if valid.any():
-            rr = rr[valid]
-            bpm = 60 / rr
+            ibi_valid = ibi[valid]
+            instantaneous_bpm = 60 / ibi_valid
             bpm_times = peak_times[1:][valid]
-            metrics["bpm"] = bpm
+
+            # Apply moving median filter
+            if len(instantaneous_bpm) >= BPM_WINDOW:
+                bpm_smooth = np.array(
+                    [
+                        np.median(instantaneous_bpm[max(0, i - BPM_WINDOW + 1) : i + 1])
+                        for i in range(len(instantaneous_bpm))
+                    ]
+                )
+            else:
+                bpm_smooth = instantaneous_bpm
+
+            metrics["instantaneous_bpm"] = instantaneous_bpm
+            metrics["bpm"] = bpm_smooth
             metrics["bpm_times"] = bpm_times
             return metrics
 
+    # Not enough valid peaks
     metrics["bpm"] = np.array([0.0])
     metrics["bpm_times"] = np.array([times[-1]])
+    metrics["instantaneous_bpm"] = np.array([0.0])
     return metrics
 
 
@@ -136,7 +170,7 @@ def init_plots() -> Tuple[Figure, NDArray[np.object_], Line2D, Line2D, Line2D, L
     axes[0].grid(True)
     axes[0].legend()
 
-    (filtered_line,) = axes[1].plot([], [], label="Filtered Signal (0.7-3.5 Hz)")
+    (filtered_line,) = axes[1].plot([], [], label="Filtered SCG (0.8-4.0 Hz)")
     (peak_marks,) = axes[1].plot([], [], "x", label="Detected Peaks", color="red")
     axes[1].set_title("Filtered Signal & Detected Peaks")
     axes[1].set_xlabel("Time (s)")
@@ -208,6 +242,18 @@ def update_plots(
     plt.pause(0.001)
 
 
+async def create_handler(websocket: ServerProtocol) -> None:
+    """Create a websocket handler"""
+    try:
+        while True:
+            if len(send_message_queue) > 0:
+                message = send_message_queue.popleft()
+                await websocket.send(f"{message}")  # type: ignore
+            await asyncio.sleep(0.01)
+    except websockets.exceptions.ConnectionClosed:
+        pass  # Client disconnected
+
+
 async def main() -> None:
     """Main entrypoint"""
     time_buffer: Deque[float] = deque(maxlen=MAX_POINTS)
@@ -215,8 +261,10 @@ async def main() -> None:
 
     fig, axes, raw_line, filtered_line, peak_marks, hr_line = init_plots()
 
-    last_time = 0.0
+    server = await websockets.serve(create_handler, "0.0.0.0", 5555)  # type: ignore
+    await server.start_serving()
 
+    last_time = 0.0
     async with httpx.AsyncClient(base_url=URL, timeout=5.0) as client:
         while True:
             # Fetch new data from phyphox
@@ -256,6 +304,12 @@ async def main() -> None:
                     signal_np,
                     metrics,
                 )
+
+                # Send current BPM to WebSocket
+                bpm = metrics.get("bpm", np.array([]))
+                if bpm.size > 0:
+                    current_bpm = float(bpm[-1] or 0.0)
+                    send_message_queue.append(current_bpm)
 
             await asyncio.sleep(POLL_INTERVAL)
 
