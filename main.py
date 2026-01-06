@@ -15,8 +15,8 @@ from scipy.signal import butter, filtfilt, find_peaks # type: ignore
 
 URL = "http://192.168.20.59:8080"
 MAX_POINTS = 250
-LOWCUT = 1  # 60 BPM
-HIGHCUT = 4  # 240 BPM
+LOWCUT = 5  # 60 BPM
+HIGHCUT = 20  # 240 BPM
 POLL_INTERVAL = 0.1
 PROMINENCE_MULTIPLIER = 1
 MIN_PROMINENCE = 0.0005
