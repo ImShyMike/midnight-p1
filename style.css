@@ -1,0 +1,14 @@
+body {
+    font-family: Arial, sans-serif;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+#messages {
+    height: 300px;
+    border: 1px solid #ccc;
+    overflow-y: auto;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+.message { margin: 5px 0; }
