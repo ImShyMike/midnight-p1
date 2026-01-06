@@ -248,7 +248,7 @@ async def create_handler(websocket: ServerProtocol) -> None:
         while True:
             if len(send_message_queue) > 0:
                 message = send_message_queue.popleft()
-                await websocket.send(f"{message}")  # type: ignore
+                await websocket.send(f"{round(message)}")  # type: ignore
             await asyncio.sleep(0.01)
     except websockets.exceptions.ConnectionClosed:
         pass  # Client disconnected
