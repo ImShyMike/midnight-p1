@@ -60,16 +60,19 @@ ws.onmessage = (event) => {
     if (gay.length > 40){
         gay.shift();
     }
+    const dataset = myChart.data.datasets[0];
     if(event.data === "0"){
-        lesbian = "#8492a6";
+        dataset.borderColor = "#8492a6";
         document.getElementById("honkshoo").innerText = "Dead"
+        document.getElementById("honkshoo").style.color = "#8492a6"
     }else{
-        lesbian = "#ec3750";
+        dataset.borderColor = "#ec3750";
         document.getElementById("honkshoo").innerText = "Alive"
+        document.getElementById("honkshoo").style.color = "#ec3750"
     }
 
 
-    myChart.update();
+    myChart.update('none');
 };
 
 // Handle errors
